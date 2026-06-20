@@ -226,6 +226,24 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
             test "$got" = "RESTORED" || return 1
         }
 
+        function test_set_e_safe() {
+            # regression: a caller with set -e must not abort when calling defer.
+            # _defer_restore must not return nonzero -- otherwise the bare call to
+            # it inside defer trips set -e, killing the caller mid-function (after
+            # the trap is registered but before defer returns). run in a child that
+            # exits 0 so the full EXIT chain has to fire.
+            local got
+            got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
+                set -e
+                source "$DEFER_SH_PATH"
+                defer "echo c" EXIT
+                defer "echo b" EXIT
+                defer "echo a" EXIT
+                echo go
+            ')
+            test "$got" = $'go\na\nb\nc' || return 1
+        }
+
         # no color when NO_COLOR is set (any value) or stdout is not a tty
         if [[ -n "${NO_COLOR+x}" || ! -t 1 ]]; then
             c_green="" c_red="" c_reset=""
