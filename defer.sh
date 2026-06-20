@@ -16,7 +16,7 @@ fi
 if [[ -z "${__DEFER_SH__:-}" ]]; then
     # spellchecker: ignore Marcin Konowalczyk lczyk subshell
 
-    __DEFER_SH_VERSION__='1.1.6'
+    __DEFER_SH_VERSION__='1.2.0'
 
     # Defers execution of a command until the specified signal(s) is received.
     # Multiple commands can be deferred to the same signal, and they will be
@@ -27,10 +27,16 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
     # https://stackoverflow.com/a/7287873/2531987
     # CC-BY-SA 3.0
     function defer() {
-        (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; return 2; }
+        # suppress our own xtrace (set DEFER_DEBUG to keep it)
+        # restore manually rather than by trap not to clobber callers RETURN traps
+        local _defer_xtrace=
+        [[ $- == *x* && -z "${DEFER_DEBUG:-}" ]] && { set +x; _defer_xtrace=1; }
+        _defer_restore() { [[ -n $_defer_xtrace ]] && unset -f _defer_restore; set -x; }
+
+        (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
         local defer_cmd="$1"; shift
         defer_cmd="${defer_cmd%"${defer_cmd##*[!;[:space:]]}"}" # strip trailing ; and whitespace
-        (($#)) || { printf "defer: no signal name given\n" >&2; return 2; }
+        (($#)) || { printf "defer: no signal name given\n" >&2; _defer_restore; return 2; }
         # shellcheck disable=SC2317,SC2329 # invoked indirectly via eval
         _defer_extract() { printf '%s\n' "${3:-}"; }
         local defer_name new_cmd existing_cmd rc=0
@@ -41,6 +47,7 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
             trap -- "$new_cmd" "$defer_name" || { printf "Error: Unable to modify trap for %s\n" "$defer_name" >&2; rc=1; }
         done
         unset -f _defer_extract
+        _defer_restore
         return $rc
     }
     declare -f -t defer
@@ -182,6 +189,24 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
                 echo "$o"
             ')
             test "$got" = "BA" || return 1
+        }
+
+        function test_xtrace_suppression_preserves_caller_return_trap() {
+            # regression: the xtrace-hiding path must not disturb a RETURN trap the caller
+            # installed. defer carries the functrace attr, so it inherits the caller's
+            # RETURN trap -- an earlier impl restored xtrace via `trap - RETURN`, which
+            # deleted the caller's. assert the trap fires identically with and without
+            # `set -x`. (run in children so the set -x noise stays isolated.)
+            # shellcheck disable=SC2016 # $DEFER_SH_PATH is expanded by the child shell, not here
+            local body='source "$DEFER_SH_PATH"; o=""
+                f() { trap "o+=R" RETURN; defer "true" EXIT; }'
+            local quiet noisy
+            quiet=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c "$body"'
+                f; trap - EXIT; echo "$o"')
+            noisy=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c "$body"'
+                set -x; f; set +x; trap - EXIT; echo "$o"' 2>/dev/null)
+            test -n "$quiet" || return 1          # sanity: caller trap fired at all
+            test "$quiet" = "$noisy" || return 1  # xtrace path must not change it
         }
 
         # no color when NO_COLOR is set (any value) or stdout is not a tty
