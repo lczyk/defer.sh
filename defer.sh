@@ -36,11 +36,15 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         (($#)) || { printf "defer: no signal name given\n" >&2; _defer_restore; return 2; }
         # shellcheck disable=SC2317,SC2329 # invoked indirectly via eval
         _defer_extract() { printf '%s\n' "${3:-}"; }
-        local defer_name new_cmd existing_cmd rc=0
+        local defer_name new_cmd existing_cmd rc=0 marker
         for defer_name in "$@"; do
+            # a no-op marker: invisible normally, but under set -x it prints a
+            # labelled header so the deferred commands don't appear out of nowhere.
+            marker=$(printf ": 'defer: running %s handlers';" "$defer_name")
             existing_cmd=$(eval "_defer_extract $(trap -p "${defer_name}")")
             existing_cmd=${existing_cmd#'defer_status=$?; '} # remove leading status capture
-            new_cmd="$(printf '%s' 'defer_status=$?; '; printf '%s; ' "${defer_cmd}"; printf '%s' "${existing_cmd}")"
+            existing_cmd=${existing_cmd#"$marker "}          # remove our xtrace marker
+            new_cmd="$(printf '%s' 'defer_status=$?; '; printf '%s ' "${marker}"; printf '%s; ' "${defer_cmd}"; printf '%s' "${existing_cmd}")"
             trap -- "$new_cmd" "$defer_name" || { printf "Error: Unable to modify trap for %s\n" "$defer_name" >&2; rc=1; }
         done
         unset -f _defer_extract
@@ -197,6 +201,23 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
                 set -x; f; set +x; trap - EXIT; echo "$o"' 2>/dev/null)
             test -n "$quiet" || return 1          # sanity: caller trap fired at all
             test "$quiet" = "$noisy" || return 1  # xtrace path must not change it
+        }
+
+        function test_xtrace_restored_under_custom_ifs() {
+            # regression: restoring xtrace must not depend on IFS containing a space.
+            # an unquoted ${_defer_xtrace:+set -x} word-splits "set -x" into two words
+            # only when IFS has a space -- under IFS=: (or IFS=$'\n', etc.) it stays one
+            # word, fails to run, and xtrace is silently lost. (run in a child so the
+            # set -x output stays isolated; trace goes to stderr, the token to stdout.)
+            local got
+            got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
+                source "$DEFER_SH_PATH"
+                IFS=:
+                set -x
+                defer "true" EXIT
+                case $- in *x*) echo RESTORED;; *) echo LOST;; esac
+            ' 2>/dev/null)
+            test "$got" = "RESTORED" || return 1
         }
 
         # no color when NO_COLOR is set (any value) or stdout is not a tty
