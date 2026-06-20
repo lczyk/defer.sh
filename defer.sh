@@ -16,7 +16,7 @@ fi
 if [[ -z "${__DEFER_SH__:-}" ]]; then
     # spellchecker: ignore Marcin Konowalczyk lczyk subshell
 
-    __DEFER_SH_VERSION__='1.2.1'
+    __DEFER_SH_VERSION__='1.2.2'
 
     # Defers execution of a command until the specified signal(s) is received.
     # Multiple commands can be deferred to the same signal, and they will be
@@ -29,11 +29,11 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
     function defer() {
         # suppress our own xtrace (set DEFER_DEBUG to keep it)
         # restore manually rather than by trap not to clobber callers RETURN traps
-        # single `case` instead of `[[ a && b ]]`: each `&&` arm of a `[[ ]]` gets its
-        # own xtrace line, so the case form halves the trace noise before `set +x` lands.
-        local _defer_xtrace=
-        case "$-:${DEFER_DEBUG:-}" in *x*:) set +x; _defer_xtrace=1;; esac
-        _defer_restore() { unset -f _defer_restore; [[ -n $_defer_xtrace ]] && set -x; }
+        # single `case` instead of `[[ a && b ]]`: each `&&` arm of a `[[ ]]` gets its own
+        # xtrace line. the `local` lives in the match branch so it adds no line of its own;
+        # restore reads it `:-`-guarded for set -u safety. leaves just case + `set +x`.
+        case "$-:${DEFER_DEBUG:-}" in *x*:) set +x; local _defer_xtrace=1;; esac
+        _defer_restore() { unset -f _defer_restore; [[ -n ${_defer_xtrace:-} ]] && set -x; }
 
         (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
         local defer_cmd="$1"; shift
