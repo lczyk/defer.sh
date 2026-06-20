@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# This file is the 'source'able version of defer
-# It can be used in other scripts to provide the 'defer' function
+# this file is the 'source'able version of defer
+# it can be used in other scripts to provide the 'defer' function
 # https://gist.github.com/lczyk/334619a32eaaf17443d404ecc5fc0ee6
 
 # Meant to be sourced, not executed. Refuse direct execution (except --test).
@@ -9,31 +9,26 @@ if [[ "${BASH_SOURCE[0]}" == "$0" && "${1:-}" != "--test" ]]; then
     exit 1
 fi
 
-# Include-guard: makes repeated sourcing of this file a cheap no-op (body runs once
-# per shell). Re-sourcing is trap-safe either way -- the body only (re)defines the
-# function, it never touches traps -- so already-deferred commands survive a second
-# source. See the matching NOTE at the bottom on why the guard is NOT exported.
 if [[ -z "${__DEFER_SH__:-}" ]]; then
     # spellchecker: ignore Marcin Konowalczyk lczyk subshell
 
-    __DEFER_SH_VERSION__='1.2.2'
+    __DEFER_SH_VERSION__='1.3.0'
 
     # Defers execution of a command until the specified signal(s) is received.
     # Multiple commands can be deferred to the same signal, and they will be
     # executed in reverse order of deferral (LIFO).
     #
     # Written by Marcin Konowalczyk @lczyk
-    # Adapted from post by Richard Hansen:
+    # Based on a post by Richard Hansen:
     # https://stackoverflow.com/a/7287873/2531987
     # CC-BY-SA 3.0
     function defer() {
-        # suppress our own xtrace (set DEFER_DEBUG to keep it)
-        # restore manually rather than by trap not to clobber callers RETURN traps
-        # single `case` instead of `[[ a && b ]]`: each `&&` arm of a `[[ ]]` gets its own
-        # xtrace line. the `local` lives in the match branch so it adds no line of its own;
-        # restore reads it `:-`-guarded for set -u safety. leaves just case + `set +x`.
-        case "$-:${DEFER_DEBUG:-}" in *x*:) set +x; local _defer_xtrace=1;; esac
-        _defer_restore() { unset -f _defer_restore; [[ -n ${_defer_xtrace:-} ]] && set -x; }
+        # suppress our own xtrace (set DEFER_DEBUG to keep it). restore manually
+        # rather than by trap, so we don't clobber the caller's RETURN trap.
+        ${DEFER_DEBUG:+:} set +x <<<"${_defer_x:=${-//[!x]/}}"  # one-line magic. equivalent to line below)
+        # case "$-:${DEFER_DEBUG:-}" in *x*:) set +x; local _defer_xtrace=1;; esac
+        local _defer_xtrace="$_defer_x"; unset _defer_x
+        _defer_restore() { unset -f _defer_restore; ${_defer_xtrace:+set -x}; }
 
         (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
         local defer_cmd="$1"; shift
@@ -159,15 +154,12 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         }
 
         function test_returns_error_on_bad_signal() {
-            defer "true" BOGUSSIG 2>/dev/null
+            defer "true" NOTASIGNAL 2>/dev/null
             test "$?" -ne 0 || return 1
         }
 
         function test_child_process_can_source() {
-            # regression: __DEFER_SH__ must NOT be exported. A parent that fully sources
-            # defer.sh then spawns a child which also sources it -- the child must still
-            # get defer. If the guard were exported, the child would inherit it but not
-            # the (non-exported) function, so its source would no-op and defer go missing.
+            # regression test: __DEFER_SH__ must not be exported
             local got
             got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
                 source "$DEFER_SH_PATH"
@@ -179,7 +171,7 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         function test_resourcing_preserves_traps() {
             # sourcing defer.sh a second time must be a safe no-op: an already-registered
             # trap survives the re-source, so deferred commands keep their LIFO order.
-            # (run in a child so $$ is its own pid -- macOS bash 3.2 has no BASHPID.)
+            # note: run in a child so $$ is its own pid -- bash 3.2 has no BASHPID
             local got
             got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
                 source "$DEFER_SH_PATH"
@@ -194,12 +186,8 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         }
 
         function test_xtrace_suppression_preserves_caller_return_trap() {
-            # regression: the xtrace-hiding path must not disturb a RETURN trap the caller
-            # installed. defer carries the functrace attr, so it inherits the caller's
-            # RETURN trap -- an earlier impl restored xtrace via `trap - RETURN`, which
-            # deleted the caller's. assert the trap fires identically with and without
-            # `set -x`. (run in children so the set -x noise stays isolated.)
-            # shellcheck disable=SC2016 # $DEFER_SH_PATH is expanded by the child shell, not here
+            # regression test. the xtrace-hiding path must not clobber RETURN trap of the caller
+            # shellcheck disable=SC2016
             local body='source "$DEFER_SH_PATH"; o=""
                 f() { trap "o+=R" RETURN; defer "true" EXIT; }'
             local quiet noisy
@@ -220,8 +208,7 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
 
         status=0
 
-        # Discover test functions in declaration order (declare -F sorts alphabetically,
-        # so scan the source instead to preserve the order they appear in this file).
+        # fiscover test functions in declaration order (declare -F sorts alphabetically)
         # spellchecker: ignore mpass mfail
         while read -r line; do
             [[ $line =~ ^[[:space:]]*function[[:space:]]+(test_[A-Za-z0-9_]+) ]] || continue
@@ -242,7 +229,7 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         fi
     fi
 
-    # NOTE: not exported -- this guard is shell-local. Exporting it would leak into
-    # child processes (which don't inherit the function) and stop them sourcing defer.
+    # no not export __DEFER_SH__. it would leak into child processes
+    # (which don't inherit the function) and stop them sourcing defer.
     __DEFER_SH__=1
 fi
