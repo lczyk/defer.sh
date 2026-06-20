@@ -1,0 +1,19 @@
+name: lint_and_test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  lint_and_test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Lint
+      run: shellcheck defer.sh example.sh
+
+    - name: Test
+      run: bash defer.sh --test
