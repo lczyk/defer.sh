@@ -17,7 +17,7 @@ fi
 if [[ -z "${__DEFER_SH__:-}" ]]; then
     # spellchecker: ignore Marcin Konowalczyk lczyk subshell
 
-    __DEFER_SH_VERSION__='1.3.0'
+    __DEFER_SH_VERSION__='2.0.0'
 
     # Defers execution of a command until the specified signal(s) is received.
     # Multiple commands can be deferred to the same signal, and they will be
