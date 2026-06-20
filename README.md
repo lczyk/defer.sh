@@ -69,12 +69,11 @@ kill -USR2 $$ # bye
 # ...and again on EXIT
 ```
 
-if any of the defered commands fails, it's status is saved in the
-`$defer_status` variable:
+if any of the deferred commands fail, the trigger status is available via `$?`:
 
 ```bash
 (
-    defer 'echo "exited with $defer_status"' EXIT
+    defer 'echo "exited with $?"' EXIT
     exit 99
 ) # exited with 99
 ```
@@ -111,7 +110,7 @@ $ DEFER_DEBUG=1 bash -x example.sh 2>&1 | head
 + source defer.sh
 ++ [[ defer.sh == \e\x\a\m\p\l\e\.\s\h ]]
 ++ [[ -z '' ]]
-++ __DEFER_SH_VERSION__=1.3.0
+++ __DEFER_SH_VERSION__=2.0.0
 ++ declare -f -t defer
 ++ [[ 2 -eq 1 ]]
 ++ __DEFER_SH__=1
