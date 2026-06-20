@@ -31,7 +31,7 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         # restore manually rather than by trap not to clobber callers RETURN traps
         local _defer_xtrace=
         [[ $- == *x* && -z "${DEFER_DEBUG:-}" ]] && { set +x; _defer_xtrace=1; }
-        _defer_restore() { [[ -n $_defer_xtrace ]] && unset -f _defer_restore; set -x; }
+        _defer_restore() { [[ -n $_defer_xtrace ]] && { unset -f _defer_restore; set -x; } || unset -f _defer_restore; }
 
         (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
         local defer_cmd="$1"; shift
