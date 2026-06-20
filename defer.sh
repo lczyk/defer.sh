@@ -9,10 +9,14 @@ if [[ "${BASH_SOURCE[0]}" == "$0" && "${1:-}" != "--test" ]]; then
     exit 1
 fi
 
+# Include-guard: makes repeated sourcing of this file a cheap no-op (body runs once
+# per shell). Re-sourcing is trap-safe either way -- the body only (re)defines the
+# function, it never touches traps -- so already-deferred commands survive a second
+# source. See the matching NOTE at the bottom on why the guard is NOT exported.
 if [[ -z "${__DEFER_SH__:-}" ]]; then
     # spellchecker: ignore Marcin Konowalczyk lczyk subshell
 
-    __DEFER_SH_VERSION__='1.1.5'
+    __DEFER_SH_VERSION__='1.1.6'
 
     # Defers execution of a command until the specified signal(s) is received.
     # Multiple commands can be deferred to the same signal, and they will be
@@ -161,6 +165,23 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
                 bash -c "source \"\$DEFER_SH_PATH\"; type -t defer"
             ')
             test "$got" = "function" || return 1
+        }
+
+        function test_resourcing_preserves_traps() {
+            # sourcing defer.sh a second time must be a safe no-op: an already-registered
+            # trap survives the re-source, so deferred commands keep their LIFO order.
+            # (run in a child so $$ is its own pid -- macOS bash 3.2 has no BASHPID.)
+            local got
+            got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
+                source "$DEFER_SH_PATH"
+                o=""
+                defer "o+=A" USR1
+                source "$DEFER_SH_PATH"   # second source must not disturb the trap
+                defer "o+=B" USR1
+                kill -USR1 $$
+                echo "$o"
+            ')
+            test "$got" = "BA" || return 1
         }
 
         # no color when NO_COLOR is set (any value) or stdout is not a tty
