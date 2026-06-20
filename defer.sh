@@ -224,6 +224,22 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
             test "$got" = $'go\na\nb\nc' || return 1
         }
 
+        function test_set_e_failing_handler_aborts_rest() {
+            # under set -e a failing handler aborts the siblings after it (same as a
+            # plain multi-command trap). LIFO fires a, then false (aborts), so c never runs.
+            local got rc
+            got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
+                set -e
+                source "$DEFER_SH_PATH"
+                defer "echo c" EXIT
+                defer "false" EXIT
+                defer "echo a" EXIT
+                echo go
+            '); rc=$?
+            test "$got" = $'go\na' || return 1
+            test "$rc" -eq 1 || return 1
+        }
+
         # no color when NO_COLOR is set (any value) or stdout is not a tty
         if [[ -n "${NO_COLOR+x}" || ! -t 1 ]]; then
             c_green="" c_red="" c_reset=""
