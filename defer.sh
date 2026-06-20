@@ -34,7 +34,10 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         # here-string. restore manually (not a trap) so the caller's RETURN trap survives;
         # it runs after set +x, so it's untraced too. (DEFER_DEBUG flips set +x to a : noop.)
         { local _defer_xtrace=$-; ${DEFER_DEBUG:+:} set +x; } 2>/dev/null
-        _defer_restore() { unset -f _defer_restore; [[ $_defer_xtrace == *x* ]] && set -x; }
+        # NOTE: `|| set -x` not `&& set -x` so _defer_restore always returns 0 --
+        # a nonzero return trips a caller's set -e on the bare call below. inverting
+        # the test keeps it untraced (set -x still runs only when xtrace was on).
+        _defer_restore() { unset -f _defer_restore; [[ $_defer_xtrace != *x* ]] || set -x; }
 
         (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
         local defer_cmd="$1"; shift
