@@ -28,7 +28,10 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         ${DEFER_DEBUG:+:} set +x <<<"${_defer_x:=${-//[!x]/}}"  # one-line magic. equivalent to line below)
         # case "$-:${DEFER_DEBUG:-}" in *x*:) set +x; local _defer_xtrace=1;; esac
         local _defer_xtrace="$_defer_x"; unset _defer_x
-        _defer_restore() { unset -f _defer_restore; ${_defer_xtrace:+set -x}; }
+        # restore runs after set +x already fired, so it's untraced -- a plain
+        # [[ ]] && costs no xtrace line and (unlike an unquoted ${x:+set -x}) does
+        # not depend on IFS containing a space to split "set -x" into two words.
+        _defer_restore() { unset -f _defer_restore; [[ -n ${_defer_xtrace:-} ]] && set -x; }
 
         (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
         local defer_cmd="$1"; shift
