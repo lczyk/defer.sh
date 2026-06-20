@@ -46,14 +46,27 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         # shellcheck disable=SC2317,SC2329 # invoked indirectly via eval
         _defer_extract() { printf '%s\n' "${3:-}"; }
         local defer_name new_cmd existing_cmd rc=0 marker
+        # reset $? to the trigger status (captured once into _defer_status) before each
+        # handler, so every handler -- ours or a pre-existing trap -- sees it via $?.
+        # ( exit N ) && : is set -e-safe: the failing subshell sits on the LHS of &&,
+        # which is exempt from errexit, and the short-circuit skips the : so the status
+        # survives as N. expanded at trap-fire time, hence single-quoted here.
+        # shellcheck disable=SC2016
+        local reset='( exit "$_defer_status" ) && :;'
         for defer_name in "$@"; do
             # a no-op marker: invisible normally, but under set -x it prints a
             # labelled header so the deferred commands don't appear out of nowhere.
             marker=$(printf ": 'defer: running %s handlers';" "$defer_name")
             existing_cmd=$(eval "_defer_extract $(trap -p "${defer_name}")")
-            existing_cmd=${existing_cmd#'defer_status=$?; '} # remove leading status capture
-            existing_cmd=${existing_cmd#"$marker "}          # remove our xtrace marker
-            new_cmd="$(printf '%s' 'defer_status=$?; '; printf '%s ' "${marker}"; printf '%s; ' "${defer_cmd}"; printf '%s' "${existing_cmd}")"
+            case $existing_cmd in
+                '_defer_status=$?; '*)
+                    # our own chain: strip the leading bookkeeping, keep its per-handler resets
+                    existing_cmd=${existing_cmd#'_defer_status=$?; '}
+                    existing_cmd=${existing_cmd#"$marker "}
+                    ;;
+                ?*) existing_cmd="$reset $existing_cmd" ;; # foreign trap: give it a reset too
+            esac
+            new_cmd="$(printf '%s' '_defer_status=$?; '; printf '%s ' "${marker}"; printf '%s ' "${reset}"; printf '%s; ' "${defer_cmd}"; printf '%s' "${existing_cmd}")"
             trap -- "$new_cmd" "$defer_name" || { printf "Error: Unable to modify trap for %s\n" "$defer_name" >&2; rc=1; }
         done
         unset -f _defer_extract
