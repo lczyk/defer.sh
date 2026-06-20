@@ -3,6 +3,11 @@
 # it can be used in other scripts to provide the 'defer' function
 # https://gist.github.com/lczyk/334619a32eaaf17443d404ecc5fc0ee6
 
+# hide our own source-time xtrace so `bash -x caller.sh` isn't drowned in defer
+# internals (set DEFER_DEBUG to keep it). the redirected group sends even these
+# two lines' trace to /dev/null; xtrace is restored at the very end of the file.
+{ _defer_src_x=$-; ${DEFER_DEBUG:+:} set +x; } 2>/dev/null
+
 # Meant to be sourced, not executed. Refuse direct execution (except --test).
 if [[ "${BASH_SOURCE[0]}" == "$0" && "${1:-}" != "--test" ]]; then
     printf "This file should be sourced, not executed\n" >&2
@@ -23,15 +28,13 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
     # https://stackoverflow.com/a/7287873/2531987
     # CC-BY-SA 3.0
     function defer() {
-        # suppress our own xtrace (set DEFER_DEBUG to keep it). restore manually
-        # rather than by trap, so we don't clobber the caller's RETURN trap.
-        ${DEFER_DEBUG:+:} set +x <<<"${_defer_x:=${-//[!x]/}}"  # one-line magic. equivalent to line below)
-        # case "$-:${DEFER_DEBUG:-}" in *x*:) set +x; local _defer_xtrace=1;; esac
-        local _defer_xtrace="$_defer_x"; unset _defer_x
-        # restore runs after set +x already fired, so it's untraced -- a plain
-        # [[ ]] && costs no xtrace line and (unlike an unquoted ${x:+set -x}) does
-        # not depend on IFS containing a space to split "set -x" into two words.
-        _defer_restore() { unset -f _defer_restore; [[ -n ${_defer_xtrace:-} ]] && set -x; }
+        # suppress our own xtrace (set DEFER_DEBUG to keep it). 2>/dev/null on the brace
+        # group swallows the trace of both inner commands (xtrace -> fd 2), so capture +
+        # set +x cost zero trace lines and _defer_xtrace stays local -- no global, no
+        # here-string. restore manually (not a trap) so the caller's RETURN trap survives;
+        # it runs after set +x, so it's untraced too. (DEFER_DEBUG flips set +x to a : noop.)
+        { local _defer_xtrace=$-; ${DEFER_DEBUG:+:} set +x; } 2>/dev/null
+        _defer_restore() { unset -f _defer_restore; [[ $_defer_xtrace == *x* ]] && set -x; }
 
         (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
         local defer_cmd="$1"; shift
@@ -257,3 +260,7 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
     # (which don't inherit the function) and stop them sourcing defer.
     __DEFER_SH__=1
 fi
+
+# restore the caller's xtrace (untraced: x is still off here, so set -x prints
+# nothing). unset before set -x so the cleanup leaves no trace line either.
+case $_defer_src_x in *x*) unset _defer_src_x; set -x;; *) unset _defer_src_x;; esac
