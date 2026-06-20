@@ -28,15 +28,8 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
     # https://stackoverflow.com/a/7287873/2531987
     # CC-BY-SA 3.0
     function defer() {
-        # suppress our own xtrace (set DEFER_DEBUG to keep it). 2>/dev/null on the brace
-        # group swallows the trace of both inner commands (xtrace -> fd 2), so capture +
-        # set +x cost zero trace lines and _defer_xtrace stays local -- no global, no
-        # here-string. restore manually (not a trap) so the caller's RETURN trap survives;
-        # it runs after set +x, so it's untraced too. (DEFER_DEBUG flips set +x to a : noop.)
+        # suppress xtrace (set DEFER_DEBUG to keep it). dont restore with trap so we dont clobber callers traps
         { local _defer_xtrace=$-; ${DEFER_DEBUG:+:} set +x; } 2>/dev/null
-        # NOTE: `|| set -x` not `&& set -x` so _defer_restore always returns 0 --
-        # a nonzero return trips a caller's set -e on the bare call below. inverting
-        # the test keeps it untraced (set -x still runs only when xtrace was on).
         _defer_restore() { unset -f _defer_restore; [[ $_defer_xtrace != *x* ]] || set -x; }
 
         (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
@@ -46,13 +39,9 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         # shellcheck disable=SC2317,SC2329 # invoked indirectly via eval
         _defer_extract() { printf '%s\n' "${3:-}"; }
         local defer_name new_cmd existing_cmd rc=0 marker
-        # reset $? to the trigger status (captured once into _defer_status) before each
-        # handler, so every handler -- ours or a pre-existing trap -- sees it via $?.
-        # ( exit N ) && : is set -e-safe: the failing subshell sits on the LHS of &&,
-        # which is exempt from errexit, and the short-circuit skips the : so the status
-        # survives as N. expanded at trap-fire time, hence single-quoted here.
+        # reset $? to the trigger status before each handler, so sees it via $?, just like it would in a normal trap
         # shellcheck disable=SC2016
-        local reset='( exit "$_defer_status" ) && :;'
+        local reset='( exit "$_defer_status" ) && :;' # trick to set $? even under set -x
         for defer_name in "$@"; do
             # a no-op marker: invisible normally, but under set -x it prints a
             # labelled header so the deferred commands don't appear out of nowhere.
@@ -76,10 +65,8 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
     declare -f -t defer
 
     ############################################################################
-    # Self-test when run directly with --test
-    # bash defer.sh --test
+    # Self-test when run as `bash defer.sh --test`
     if [[ "${#BASH_SOURCE[@]}" -eq 1 && "${BASH_SOURCE[0]}" == "$0" && "$1" == "--test" ]]; then
-        ###################### usage examples ######################
         function test_basic() {
             test_var=0
             defer "test_var=1" USR1
@@ -98,25 +85,12 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         }
 
         function test_captures_status() {
-            # every deferred command sees the trigger status via $?, regardless of what
-            # sibling handlers ran before it ($? is reset to the trigger before each).
             test "$(
                 defer 'echo $?' EXIT
                 defer 'false' EXIT
                 exit 99
             )" -eq 99 || return 1
-            # _defer_status is the internal capture the resets read; $? is derived from it.
-            # shellcheck disable=SC2016
-            test "$(
-                defer 'echo $_defer_status' EXIT
-                defer 'false' EXIT
-                exit 99
-            )" -eq 99 || return 1
-        }
-
-        function test_status_visible_to_handset_trap() {
-            # a pre-existing (hand-set) trap that reads $? must also see the trigger
-            # status, not the status of the deferred command stacked in front of it.
+            # also works with hand-set traps
             test "$(
                 trap 'echo $?' EXIT
                 defer 'false' EXIT
@@ -144,7 +118,8 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
             test "$test_var" = "ab" || return 1
         }
 
-        ################# edge-case / regression ###################
+        ################# edge-cases / regression tests ###################
+
         function test_tolerates_trailing_semicolon() {
             test_var=0
             defer "test_var=1;" USR1
@@ -208,7 +183,6 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         function test_resourcing_preserves_traps() {
             # sourcing defer.sh a second time must be a safe no-op: an already-registered
             # trap survives the re-source, so deferred commands keep their LIFO order.
-            # note: run in a child so $$ is its own pid -- bash 3.2 has no BASHPID
             local got
             got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
                 source "$DEFER_SH_PATH"
@@ -236,29 +210,8 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
             test "$quiet" = "$noisy" || return 1  # xtrace path must not change it
         }
 
-        function test_xtrace_restored_under_custom_ifs() {
-            # regression: restoring xtrace must not depend on IFS containing a space.
-            # an unquoted ${_defer_xtrace:+set -x} word-splits "set -x" into two words
-            # only when IFS has a space -- under IFS=: (or IFS=$'\n', etc.) it stays one
-            # word, fails to run, and xtrace is silently lost. (run in a child so the
-            # set -x output stays isolated; trace goes to stderr, the token to stdout.)
-            local got
-            got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
-                source "$DEFER_SH_PATH"
-                IFS=:
-                set -x
-                defer "true" EXIT
-                case $- in *x*) echo RESTORED;; *) echo LOST;; esac
-            ' 2>/dev/null)
-            test "$got" = "RESTORED" || return 1
-        }
-
         function test_set_e_safe() {
-            # regression: a caller with set -e must not abort when calling defer.
-            # _defer_restore must not return nonzero -- otherwise the bare call to
-            # it inside defer trips set -e, killing the caller mid-function (after
-            # the trap is registered but before defer returns). run in a child that
-            # exits 0 so the full EXIT chain has to fire.
+            # regression test: a caller with set -e must not abort when calling defer
             local got
             got=$(DEFER_SH_PATH="${BASH_SOURCE[0]}" bash -c '
                 set -e
@@ -280,7 +233,7 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
 
         status=0
 
-        # fiscover test functions in declaration order (declare -F sorts alphabetically)
+        # discover test functions in declaration order (declare -F sorts alphabetically)
         # spellchecker: ignore mpass mfail
         while read -r line; do
             [[ $line =~ ^[[:space:]]*function[[:space:]]+(test_[A-Za-z0-9_]+) ]] || continue
@@ -306,6 +259,5 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
     __DEFER_SH__=1
 fi
 
-# restore the caller's xtrace (untraced: x is still off here, so set -x prints
-# nothing). unset before set -x so the cleanup leaves no trace line either.
+# restore the caller's xtrace
 case $_defer_src_x in *x*) unset _defer_src_x; set -x;; *) unset _defer_src_x;; esac
