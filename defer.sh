@@ -40,27 +40,27 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         (($#)) || { printf "defer: no signal name given\n" >&2; _defer_restore; return 2; }
         # shellcheck disable=SC2317,SC2329 # invoked indirectly via eval
         _defer_extract() { printf '%s\n' "${3:-}"; }
-        local defer_name new_cmd existing_cmd rc=0 marker
-        # reset $? to the trigger status before each handler, so sees it via $?, just like it would in a normal trap
-        # the && : is set -e-safe (errexit-exempt LHS; short-circuit skips the noop on
-        # nonzero, so the status survives). the noop carries a label so under set -x the
-        # trace reads `: 'defer: $? = exit status'` instead of a bare `:`.
+        local defer_name new_cmd existing_cmd rc=0 m rest
+        # before each handler, reset $? to the trigger status, so handlers see it via $?,
+        # like a normal trap. ( exit N ) && ... is a trick to set $? under set -e.
+        # under set -x the noop also prints which handler is about to run (i/m).
         # shellcheck disable=SC2016
-        local reset='( exit "$_defer_status" ) && : "defer: \$? = exit status";'
+        local reset='( exit "$_defer_status" ) && : "defer: running handler $((++_defer_i))/$_defer_m";'
+        # shellcheck disable=SC2016
+        local token='( exit "$_defer_status" )' # one per handler; counted to size the chain
         for defer_name in "$@"; do
-            # a no-op marker: invisible normally, but under set -x it prints a
-            # labelled header so the deferred commands don't appear out of nowhere.
-            marker=$(printf ": 'defer: running %s handlers';" "$defer_name")
             existing_cmd=$(eval "_defer_extract $(trap -p "${defer_name}")")
             case $existing_cmd in
-                '_defer_status=$?; '*)
-                    # our own chain: strip the leading bookkeeping, keep its per-handler resets
-                    existing_cmd=${existing_cmd#'_defer_status=$?; '}
-                    existing_cmd=${existing_cmd#"$marker "}
-                    ;;
+                # our chain: strip the front bookkeeping group, anchored on its close
+                '{ _defer_status=$?; '*) existing_cmd=${existing_cmd#*'} 2>/dev/null; '} ;;
                 ?*) existing_cmd="$reset $existing_cmd" ;; # foreign trap: give it a reset too
             esac
-            new_cmd="$(printf '%s' '_defer_status=$?; '; printf '%s ' "${marker}"; printf '%s ' "${reset}"; printf '%s; ' "${defer_cmd}"; printf '%s' "${existing_cmd}")"
+            # chain length = per-handler tokens already present + the one we're adding
+            rest=${existing_cmd//"$token"/}
+            m=$(( (${#existing_cmd} - ${#rest}) / ${#token} + 1 ))
+            # front: capture the trigger status + bookkeeping (chain length m, counter i),
+            # in a group whose stderr -> /dev/null so set -x doesn't trace these three.
+            new_cmd="$(printf '%s' "{ _defer_status=\$?; _defer_m=$m; _defer_i=0; } 2>/dev/null; "; printf '%s ' "${reset}"; printf '%s; ' "${defer_cmd}"; printf '%s' "${existing_cmd}")"
             trap -- "$new_cmd" "$defer_name" || { printf "Error: Unable to modify trap for %s\n" "$defer_name" >&2; rc=1; }
         done
         unset -f _defer_extract
@@ -89,6 +89,17 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
             defer "output+='3'" USR1
             kill -USR1 $$
             test "$output" = "321" || return 1
+        }
+
+        function test_order_with_handset_trap() {
+            # defers stack onto a pre-existing trap: deferred commands run first (LIFO),
+            # then the original hand-set trap. guards the foreign-trap path + re-stacking.
+            output=""
+            trap "output+='H'" USR1
+            defer "output+='1'" USR1
+            defer "output+='2'" USR1
+            kill -USR1 $$
+            test "$output" = "21H" || return 1
         }
 
         function test_captures_status() {
