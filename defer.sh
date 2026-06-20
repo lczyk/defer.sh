@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # this file is the 'source'able version of defer
 # it can be used in other scripts to provide the 'defer' function
-# https://gist.github.com/lczyk/334619a32eaaf17443d404ecc5fc0ee6
 
 # hide our own source-time xtrace so `bash -x caller.sh` isn't drowned in defer
 # internals (set DEFER_DEBUG to keep it). the redirected group sends even these
@@ -19,11 +18,14 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
 
     __DEFER_SH_VERSION__='2.0.0'
 
+
+
     # Defers execution of a command until the specified signal(s) is received.
     # Multiple commands can be deferred to the same signal, and they will be
     # executed in reverse order of deferral (LIFO).
     #
     # Written by Marcin Konowalczyk @lczyk
+    # https://github.com/lczyk/defer.sh
     # Based on a post by Richard Hansen:
     # https://stackoverflow.com/a/7287873/2531987
     # CC-BY-SA 3.0
@@ -40,8 +42,11 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         _defer_extract() { printf '%s\n' "${3:-}"; }
         local defer_name new_cmd existing_cmd rc=0 marker
         # reset $? to the trigger status before each handler, so sees it via $?, just like it would in a normal trap
+        # the && : is set -e-safe (errexit-exempt LHS; short-circuit skips the noop on
+        # nonzero, so the status survives). the noop carries a label so under set -x the
+        # trace reads `: 'defer: $? = exit status'` instead of a bare `:`.
         # shellcheck disable=SC2016
-        local reset='( exit "$_defer_status" ) && :;' # trick to set $? even under set -x
+        local reset='( exit "$_defer_status" ) && : "defer: \$? = exit status";'
         for defer_name in "$@"; do
             # a no-op marker: invisible normally, but under set -x it prints a
             # labelled header so the deferred commands don't appear out of nowhere.
@@ -63,6 +68,8 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         return $rc
     }
     declare -f -t defer
+
+
 
     ############################################################################
     # Self-test when run as `bash defer.sh --test`
