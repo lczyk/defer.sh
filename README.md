@@ -82,7 +82,7 @@ if any of the defered commands fails, it's status is saved in the
 running with `-x` does *NOT* spam you:
 
 ```bash
-bash -x example.sh
+$ bash -x example.sh
 + source defer.sh
 + work
 + local resource=db-handle
@@ -96,8 +96,6 @@ bash -x example.sh
 acquired db-handle
 + echo done
 done
-+ defer_status=0
-+ : 'defer: running EXIT handlers'
 + echo cleanup-first
 cleanup-first
 + echo cleanup-second
@@ -109,7 +107,7 @@ released db-handle
 unless you set `$DEFER_DEBUG`:
 
 ```bash
-DEFER_DEBUG=1 bash -x example.sh 2>&1 | head
+$ DEFER_DEBUG=1 bash -x example.sh 2>&1 | head
 + source defer.sh
 ++ [[ defer.sh == \e\x\a\m\p\l\e\.\s\h ]]
 ++ [[ -z '' ]]
