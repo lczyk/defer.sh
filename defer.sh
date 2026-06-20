@@ -85,16 +85,27 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         }
 
         function test_captures_status() {
-            # When using $? we see the status of the previous deferred command
+            # every deferred command sees the trigger status via $?, regardless of what
+            # sibling handlers ran before it ($? is reset to the trigger before each).
             test "$(
                 defer 'echo $?' EXIT
                 defer 'false' EXIT
                 exit 99
-            )" -eq 1 || return 1
-            # But $defer_status captures the status of the command that triggered the trap
+            )" -eq 99 || return 1
+            # _defer_status is the internal capture the resets read; $? is derived from it.
             # shellcheck disable=SC2016
             test "$(
-                defer 'echo $defer_status' EXIT
+                defer 'echo $_defer_status' EXIT
+                defer 'false' EXIT
+                exit 99
+            )" -eq 99 || return 1
+        }
+
+        function test_status_visible_to_handset_trap() {
+            # a pre-existing (hand-set) trap that reads $? must also see the trigger
+            # status, not the status of the deferred command stacked in front of it.
+            test "$(
+                trap 'echo $?' EXIT
                 defer 'false' EXIT
                 exit 99
             )" -eq 99 || return 1
