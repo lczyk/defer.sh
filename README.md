@@ -2,6 +2,7 @@
 
 ![GitHub Tag](https://img.shields.io/github/v/tag/lczyk/defer.sh?label=release)
 ![License](https://img.shields.io/badge/license-CC--BY--SA--3.0-blue)
+[![lint_and_test](https://github.com/lczyk/defer.sh/actions/workflows/lint_and_test.yml/badge.svg)](https://github.com/lczyk/defer.sh/actions/workflows/lint_and_test.yml)
 
 `defer` in bash. kinda. mostly. with some footguns, but honestly, given the number
 of footguns in bash itself, i think its fitting. to be clear, i've tried to polish
