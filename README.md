@@ -29,6 +29,13 @@ indeed the main use-case of `defer` over `trap`.
 `defer` was written based on a [post](https://stackoverflow.com/a/7287873/2531987)
 by Richard Hansen (CC-BY-SA 3.0).
 
+## i like to live dangerously, and i have curl
+
+```bash
+source <(curl -fsSL https://raw.githubusercontent.com/lczyk/defer.sh/main/defer.sh) || { echo "defer fetch failed" >&2; return 1; }
+...
+```
+
 ## more details
 
 note: i will skip the `source defer.sh` bit from now on.
