@@ -48,6 +48,14 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         # set -x doesn't trace them -- only the handler commands themselves show.
         # shellcheck disable=SC2016
         local reset='{ ( exit "$_defer_status" ) && :; } 2>/dev/null;'
+        # a RETURN trap set from inside a function fires once per active frame
+        # as the stack unwinds -- including defer's own return. guard RETURN
+        # handlers by frame depth so each fires only when its registering
+        # caller returns. an if-statement so the skipped case is set -e-safe,
+        # and the condition sits in a 2>/dev/null group to stay out of set -x.
+        # shellcheck disable=SC2016
+        local guard='{ (( ${#FUNCNAME[@]} == '"$(( ${#FUNCNAME[@]} - 1 ))"' )); } 2>/dev/null'
+        local unit
         for defer_name in "$@"; do
             existing_cmd=$(eval "_defer_extract $(trap -p "${defer_name}")")
             case $existing_cmd in
@@ -55,7 +63,11 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
                 '{ _defer_status=$?; '*) existing_cmd=${existing_cmd#*'} 2>/dev/null; '} ;;
                 ?*) existing_cmd="$reset $existing_cmd" ;; # foreign trap: give it a reset too
             esac
-            new_cmd="$(printf '%s' '{ _defer_status=$?; } 2>/dev/null; '; printf '%s ' "${reset}"; printf '%s; ' "${defer_cmd}"; printf '%s' "${existing_cmd}")"
+            case $defer_name in
+                [Rr][Ee][Tt][Uu][Rr][Nn]) unit="if $guard; then $reset ${defer_cmd}; fi;" ;;
+                *) unit="$reset ${defer_cmd};" ;;
+            esac
+            new_cmd="$(printf '%s' '{ _defer_status=$?; } 2>/dev/null; '; printf '%s ' "${unit}"; printf '%s' "${existing_cmd}")"
             trap -- "$new_cmd" "$defer_name" || { printf "Error: Unable to modify trap for %s\n" "$defer_name" >&2; rc=1; }
         done
         unset -f _defer_extract
@@ -119,10 +131,12 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         }
 
         function test_defer_on_function_return() {
-            test_var=0
-            function f() { defer "test_var=1" RETURN; test_var=2; }; f
-            # RETURN trap runs when the function returns, so the value is 1
-            test "$test_var" -eq 1 || return 1
+            output=""
+            function f() { defer "output+='R'" RETURN; output+='f'; }
+            function g() { f; output+='g'; }; g
+            # R fires exactly once, when f returns: not early at defer's own
+            # return, and not again as the stack unwinds through g
+            test "$output" = "fRg" || return 1
         }
 
         function test_defer_in_function_in_subshell() {
