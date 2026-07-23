@@ -37,6 +37,7 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
         (($#)) || { printf "defer: usage: defer <cmd> <signal>...\n" >&2; _defer_restore; return 2; }
         local defer_cmd="$1"; shift
         defer_cmd="${defer_cmd%"${defer_cmd##*[!;[:space:]]}"}" # strip trailing ; and whitespace
+        [[ -n "$defer_cmd" ]] || { printf "defer: empty command\n" >&2; _defer_restore; return 2; }
         (($#)) || { printf "defer: no signal name given\n" >&2; _defer_restore; return 2; }
         # shellcheck disable=SC2317,SC2329 # invoked indirectly via eval
         _defer_extract() { printf '%s\n' "${3:-}"; }
@@ -169,6 +170,15 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
             test "$test_var" -eq 0 || return 1
             kill -USR1 $$
             test "$test_var" -eq 1 || return 1
+        }
+
+        function test_rejects_empty_command() {
+            # a cmd that is empty (or strips down to empty) must be a defer-time
+            # error, not a syntax error when the signal eventually fires
+            defer "" USR1 2>/dev/null
+            test "$?" -ne 0 || return 1
+            defer ";; " USR1 2>/dev/null
+            test "$?" -ne 0 || return 1
         }
 
         function test_no_caller_namespace_leak() {
