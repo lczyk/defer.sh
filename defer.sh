@@ -16,7 +16,7 @@ fi
 if [[ -z "${__DEFER_SH__:-}" ]]; then
     # spellchecker: ignore Marcin Konowalczyk lczyk subshell
 
-    __DEFER_SH_VERSION__='2.0.0'
+    __DEFER_SH_VERSION__='2.0.1'
 
 
 

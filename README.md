@@ -118,7 +118,7 @@ $ DEFER_DEBUG=1 bash -x example.sh 2>&1 | head
 + source defer.sh
 ++ [[ defer.sh == \e\x\a\m\p\l\e\.\s\h ]]
 ++ [[ -z '' ]]
-++ __DEFER_SH_VERSION__=2.0.0
+++ __DEFER_SH_VERSION__=2.0.1
 ++ declare -f -t defer
 ++ [[ 2 -eq 1 ]]
 ++ __DEFER_SH__=1
